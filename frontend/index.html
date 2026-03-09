@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FCC 催化剂智能分析平台</title>
+  <!-- Bootstrap 5 -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+  <!-- Plotly.js -->
+  <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+  <style>
+    body { background: #f8f9fa; }
+    .navbar-brand { font-weight: 700; font-size: 1.1rem; }
+    .card { border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-radius: 10px; }
+    .metric-card { text-align: center; padding: 1rem; }
+    .metric-card .val { font-size: 1.8rem; font-weight: 700; color: #2E74B5; }
+    .metric-card .lbl { font-size: 0.85rem; color: #666; }
+    .badge-unreliable { background: #ffd6cc; color: #c0392b; }
+    .badge-priority   { background: #d6eaf8; color: #1a5276; }
+    .section-header { font-size: 1rem; font-weight: 600; color: #333; border-left: 4px solid #2E74B5; padding-left: 10px; margin: 1rem 0 0.5rem; }
+    .form-label { font-size: 0.85rem; color: #555; margin-bottom: 2px; }
+    input[type=number] { font-size: 0.85rem; }
+    .progress { height: 22px; border-radius: 6px; }
+    .tab-content { padding-top: 1.5rem; }
+    #statusBar { font-size: 0.85rem; }
+    .comp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px; }
+    .obj-row { display: grid; grid-template-columns: 2fr 1.2fr 1.5fr 0.5fr; gap: 6px; align-items: center; font-size: 0.85rem; }
+    .result-table { font-size: 0.85rem; }
+    .spinner-border-sm { width: 1rem; height: 1rem; }
+  </style>
+</head>
+<body>
+
+<!-- 导航栏 -->
+<nav class="navbar navbar-dark bg-primary sticky-top">
+  <div class="container-fluid">
+    <span class="navbar-brand"><i class="bi bi-flask"></i> FCC 催化剂智能分析平台</span>
+    <span id="statusBar" class="text-white-50">检查模型状态...</span>
+  </div>
+</nav>
+
+<div class="container-fluid py-3">
+
+  <!-- Tab 导航 -->
+  <ul class="nav nav-tabs mb-0" id="mainTabs">
+    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tabPredict"><i class="bi bi-bar-chart-fill"></i> 产率预测</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabOptimize"><i class="bi bi-magic"></i> 反向设计</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabTrain"><i class="bi bi-cpu-fill"></i> 模型训练</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabAnalysis"><i class="bi bi-graph-up"></i> 模型分析</a></li>
+  </ul>
+
+  <div class="tab-content">
+
+    <!-- ══════════════════════════════════════════ -->
+    <!-- TAB 1：产率预测 -->
+    <!-- ══════════════════════════════════════════ -->
+    <div class="tab-pane fade show active" id="tabPredict">
+      <div class="row g-3">
+        <!-- 左侧输入 -->
+        <div class="col-md-5">
+          <div class="card p-3">
+            <h6 class="mb-3"><i class="bi bi-pencil-square"></i> 输入催化剂配方</h6>
+            <div id="featureForm">
+              <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div> 加载特征信息...</div>
+            </div>
+            <button class="btn btn-primary mt-3 w-100" id="btnPredict" onclick="runPredict()" disabled>
+              <i class="bi bi-play-fill"></i> 开始预测
+            </button>
+          </div>
+        </div>
+        <!-- 右侧结果 -->
+        <div class="col-md-7">
+          <div class="card p-3" id="predictResult" style="display:none">
+            <h6 class="mb-2"><i class="bi bi-check-circle-fill text-success"></i> 预测结果</h6>
+            <div id="priorityCards" class="row g-2 mb-3"></div>
+            <div id="predictChart" style="height:420px"></div>
+            <div id="predictTable" class="mt-3"></div>
+          </div>
+          <div class="card p-4 text-center text-muted" id="predictPlaceholder">
+            <i class="bi bi-bar-chart" style="font-size:3rem;opacity:.3"></i>
+            <p class="mt-2">填写左侧配方后点击「开始预测」</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════ -->
+    <!-- TAB 2：反向设计 -->
+    <!-- ══════════════════════════════════════════ -->
+    <div class="tab-pane fade" id="tabOptimize">
+      <div class="row g-3">
+        <div class="col-md-5">
+          <div class="card p-3 mb-3">
+            <h6><i class="bi bi-sliders"></i> 优化目标设置</h6>
+            <p class="text-muted small">选择要优化的产率目标，设置方向和权重</p>
+            <div id="objectivesForm">
+              <div class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm"></div></div>
+            </div>
+          </div>
+          <div class="card p-3 mb-3">
+            <h6><i class="bi bi-boxes"></i> 搜索空间</h6>
+            <div class="mb-2">
+              <label class="form-label fw-semibold">参与优化的配方组</label>
+              <div id="groupCheckboxes">
+                <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="grp_M" value="M" checked><label class="form-check-label" for="grp_M">基质 M</label></div>
+                <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="grp_FM" value="FM" checked><label class="form-check-label" for="grp_FM">功能基质 FM</label></div>
+                <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="grp_Z" value="Z" checked><label class="form-check-label" for="grp_Z">分子筛 Z</label></div>
+                <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="grp_FZ" value="FZ" checked><label class="form-check-label" for="grp_FZ">功能分子筛 FZ</label></div>
+              </div>
+            </div>
+            <div class="row g-2">
+              <div class="col-6">
+                <div class="form-check"><input class="form-check-input" type="checkbox" id="opt_L"><label class="form-check-label small" for="opt_L">同时优化理化性质 L</label></div>
+                <div class="form-check"><input class="form-check-input" type="checkbox" id="opt_T"><label class="form-check-label small" for="opt_T">同时优化操作条件 T</label></div>
+              </div>
+              <div class="col-6">
+                <label class="form-label">固定原料油</label>
+                <select class="form-select form-select-sm" id="fixedOil"></select>
+              </div>
+            </div>
+          </div>
+          <div class="card p-3 mb-3">
+            <div class="row g-2">
+              <div class="col-6">
+                <label class="form-label">试验次数</label>
+                <input type="number" class="form-control form-control-sm" id="nTrials" value="200" min="50" max="2000" step="50">
+              </div>
+              <div class="col-6">
+                <label class="form-label">随机种子</label>
+                <input type="number" class="form-control form-control-sm" id="optSeed" value="42">
+              </div>
+            </div>
+          </div>
+          <button class="btn btn-success w-100" id="btnOptimize" onclick="runOptimize()" disabled>
+            <i class="bi bi-lightning-fill"></i> 开始贝叶斯优化
+          </button>
+        </div>
+        <div class="col-md-7">
+          <div class="card p-3" id="optimizeResult" style="display:none">
+            <h6><i class="bi bi-trophy-fill text-warning"></i> 优化结果</h6>
+            <div id="optProgress" class="mb-3" style="display:none">
+              <div class="d-flex justify-content-between small mb-1">
+                <span id="optProgressText">优化中...</span>
+                <span id="optProgressPct">0%</span>
+              </div>
+              <div class="progress"><div class="progress-bar progress-bar-striped progress-bar-animated" id="optProgressBar" style="width:0%"></div></div>
+            </div>
+            <div id="optChart" style="height:280px"></div>
+            <div id="optBestFormula" class="mt-3"></div>
+            <div id="optBestPreds" class="mt-3"></div>
+            <div id="optDownloadBtns" class="mt-2"></div>
+          </div>
+          <div class="card p-4 text-center text-muted" id="optimizePlaceholder">
+            <i class="bi bi-magic" style="font-size:3rem;opacity:.3"></i>
+            <p class="mt-2">配置优化目标后点击「开始贝叶斯优化」</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════ -->
+    <!-- TAB 3：模型训练 -->
+    <!-- ══════════════════════════════════════════ -->
+    <div class="tab-pane fade" id="tabTrain">
+      <div class="row g-3">
+        <div class="col-md-4">
+          <div class="card p-3 mb-3">
+            <h6><i class="bi bi-gear-fill"></i> 训练参数</h6>
+            <div class="mb-2">
+              <label class="form-label">n_estimators（树数量）</label>
+              <input type="number" class="form-control form-control-sm" id="nEst" value="300" min="100" max="1000" step="50">
+            </div>
+            <div class="mb-2">
+              <label class="form-label">learning_rate（学习率）</label>
+              <input type="number" class="form-control form-control-sm" id="lr" value="0.05" min="0.01" max="0.3" step="0.01">
+            </div>
+            <div class="mb-2">
+              <label class="form-label">max_depth（树深度）</label>
+              <input type="number" class="form-control form-control-sm" id="depth" value="6" min="3" max="10">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">测试集比例</label>
+              <input type="number" class="form-control form-control-sm" id="testSize" value="0.2" min="0.1" max="0.3" step="0.05">
+            </div>
+            <button class="btn btn-warning w-100" onclick="runTrain()">
+              <i class="bi bi-play-fill"></i> 开始训练所有模型
+            </button>
+          </div>
+        </div>
+        <div class="col-md-8">
+          <div class="card p-3 mb-3" id="trainStatus">
+            <h6><i class="bi bi-info-circle-fill"></i> 模型状态</h6>
+            <div id="trainStatusContent"><div class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm"></div></div></div>
+          </div>
+          <div class="card p-3" id="trainProgress" style="display:none">
+            <h6>训练进度</h6>
+            <div class="d-flex justify-content-between small mb-1">
+              <span id="trainProgressText">准备中...</span>
+              <span id="trainProgressPct">0%</span>
+            </div>
+            <div class="progress mb-3"><div class="progress-bar progress-bar-striped progress-bar-animated" id="trainProgressBar" style="width:0%"></div></div>
+            <div id="trainResultTable"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════ -->
+    <!-- TAB 4：模型分析 -->
+    <!-- ══════════════════════════════════════════ -->
+    <div class="tab-pane fade" id="tabAnalysis">
+      <ul class="nav nav-pills mb-3" id="analysisTabs">
+        <li class="nav-item"><a class="nav-link active" data-bs-toggle="pill" href="#analysisOverview">性能总览</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="pill" href="#analysisScatter">实际vs预测</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="pill" href="#analysisImportance">特征重要性</a></li>
+      </ul>
+      <div class="tab-content">
+        <!-- 性能总览 -->
+        <div class="tab-pane fade show active" id="analysisOverview">
+          <div class="card p-3 mb-3">
+            <h6>模型可信度分类</h6>
+            <div class="row g-2 mb-3" id="r2CategoryCards"></div>
+            <div id="r2CompareChart" style="height:400px"></div>
+          </div>
+          <div class="card p-3">
+            <h6>全目标性能汇总</h6>
+            <div id="summaryTable"></div>
+          </div>
+        </div>
+        <!-- 实际vs预测 -->
+        <div class="tab-pane fade" id="analysisScatter">
+          <div class="card p-3">
+            <div class="row g-2 mb-3">
+              <div class="col-md-4">
+                <label class="form-label">选择目标变量</label>
+                <select class="form-select" id="scatterTarget" onchange="loadScatter()"></select>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">显示模型</label>
+                <select class="form-select" id="scatterModel" onchange="loadScatter()">
+                  <option value="xgb">XGBoost</option>
+                </select>
+              </div>
+            </div>
+            <div id="scatterMetrics" class="row g-2 mb-3"></div>
+            <div class="row g-2">
+              <div class="col-md-6"><div id="scatterChart" style="height:380px"></div></div>
+              <div class="col-md-6"><div id="residualChart" style="height:380px"></div></div>
+            </div>
+          </div>
+        </div>
+        <!-- 特征重要性 -->
+        <div class="tab-pane fade" id="analysisImportance">
+          <div class="card p-3">
+            <div class="row g-2 mb-3">
+              <div class="col-md-4">
+                <label class="form-label">选择目标变量</label>
+                <select class="form-select" id="importanceTarget" onchange="loadImportance()"></select>
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">显示 Top N</label>
+                <input type="number" class="form-control" id="importanceTopN" value="15" min="5" max="30" onchange="loadImportance()">
+              </div>
+            </div>
+            <div id="importanceChart" style="height:500px"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /tab-content -->
+</div><!-- /container -->
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════
+// 全局状态
+// ═══════════════════════════════════════════════════════
+let metadata  = null;
+let statusData = null;
+let trainJobId = null, optJobId = null;
+let trainPollTimer = null, optPollTimer = null;
+
+// ── 启动时加载状态和元数据 ────────────────────────────
+window.onload = async () => {
+  await loadStatus();
+  await loadMetadata();
+  loadAnalysisOverview();
+};
+
+async function api(path, method='GET', body=null) {
+  const opts = { method, headers: {'Content-Type':'application/json'} };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch('/api' + path, opts);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({detail: res.statusText}));
+    throw new Error(err.detail || '请求失败');
+  }
+  return res.json();
+}
+
+async function loadStatus() {
+  try {
+    statusData = await api('/status');
+    const bar = document.getElementById('statusBar');
+    if (statusData.trained) {
+      bar.innerHTML = `<span class="text-success">✓ 模型已就绪</span> <small class="text-white-50 ms-2">${statusData.train_time} | ${statusData.n_targets} 个目标</small>`;
+      renderTrainStatus(statusData);
+    } else {
+      bar.innerHTML = `<span class="text-warning">⚠ 模型未训练</span><small class="text-white-50 ms-2">请前往「模型训练」页面</small>`;
+      document.getElementById('trainStatusContent').innerHTML = `<div class="alert alert-warning mb-0">尚未训练模型，请点击左侧「开始训练」按钮。</div>`;
+    }
+  } catch(e) {
+    document.getElementById('statusBar').textContent = '连接失败';
+  }
+}
+
+async function loadMetadata() {
+  try {
+    metadata = await api('/metadata');
+    if (!metadata.trained) return;
+    buildFeatureForm();
+    buildObjectivesForm();
+    populateOilSelect('fixedOil', metadata.oil_classes);
+    populateTargetSelects();
+    document.getElementById('btnPredict').disabled = false;
+    document.getElementById('btnOptimize').disabled = false;
+  } catch(e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════════════════════
+// TAB 1：产率预测
+// ═══════════════════════════════════════════════════════
+function buildFeatureForm() {
+  const groups = metadata.groups;
+  const bounds = metadata.bounds;
+  const oil_classes = metadata.oil_classes;
+  let html = '';
+
+  const groupLabels = {M:'基质 M', FM:'功能基质 FM', Z:'分子筛 Z', FZ:'功能分子筛 FZ', L:'理化性质 L', T:'操作条件'};
+  const groupDescs  = {M:'0=未添加',FM:'0=未添加',Z:'0=未添加',FZ:'0=未添加',L:'实测值',T:''};
+
+  for (const [grp, cols] of Object.entries(groups)) {
+    if (!cols || cols.length === 0 || grp === 'oil') continue;
+    html += `<div class="section-header">${groupLabels[grp]||grp} <small class="text-muted fw-normal">${groupDescs[grp]||''}</small></div>`;
+    html += `<div class="comp-grid mb-2">`;
+    for (const col of cols) {
+      const b = bounds[col] || [0, 100, 0];
+      const [lo, hi, med] = b;
+      const step = (hi-lo) <= 1 ? 0.001 : (hi-lo) <= 10 ? 0.1 : 1;
+      const shortName = col.split('_').slice(1).join('_') || col;
+      html += `<div>
+        <label class="form-label" title="${col}">${col.split('_')[0]} <small>${shortName.substring(0,8)}</small></label>
+        <input type="number" class="form-control form-control-sm" id="f_${col}"
+          min="${lo}" max="${hi}" step="${step}" value="${grp==='L'?med.toFixed(3):0}"
+          placeholder="${grp==='L'?med.toFixed(2):'0'}">
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  // Oil select
+  html += `<div class="section-header">原料油</div>
+    <select class="form-select form-select-sm mb-2" id="f_oil">`;
+  for (const o of (oil_classes||[])) html += `<option>${o}</option>`;
+  html += `</select>`;
+
+  document.getElementById('featureForm').innerHTML = html;
+}
+
+async function runPredict() {
+  const btn = document.getElementById('btnPredict');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner-border spinner-border-sm"></div> 预测中...';
+  try {
+    const features = collectFeatures();
+    const result = await api('/predict', 'POST', {features});
+    renderPredictResult(result);
+  } catch(e) {
+    alert('预测失败：' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-play-fill"></i> 开始预测';
+  }
+}
+
+function collectFeatures() {
+  const features = {};
+  for (const col of (metadata.feature_cols || [])) {
+    const el = document.getElementById('f_' + col);
+    if (!el) continue;
+    if (col === metadata.feature_cols.find(c => c.startsWith('oil'))) {
+      features[col] = el.value;
+    } else {
+      const v = el.value.trim();
+      features[col] = v === '' ? null : parseFloat(v);
+    }
+  }
+  // oil
+  const oilEl = document.getElementById('f_oil');
+  if (oilEl) {
+    const oilCol = (metadata.groups.oil || [])[0];
+    if (oilCol) features[oilCol] = oilEl.value;
+  }
+  return features;
+}
+
+function renderPredictResult(data) {
+  document.getElementById('predictPlaceholder').style.display = 'none';
+  document.getElementById('predictResult').style.display = '';
+
+  const preds   = data.predictions;
+  const r2dict  = data.r2;
+  const priority = data.priority_targets || [];
+  const unreliable = data.unreliable_targets || [];
+
+  // 核心指标卡片
+  let cardsHtml = '';
+  for (const t of priority) {
+    if (!(t in preds)) continue;
+    const r2 = (r2dict[t] || 0).toFixed(3);
+    const isUnreliable = unreliable.includes(t);
+    cardsHtml += `<div class="col-4 col-md-2">
+      <div class="card metric-card">
+        <div class="val">${preds[t].toFixed(2)}<small class="fs-6">%</small></div>
+        <div class="lbl">${t}</div>
+        <div><small class="text-muted">R²=${r2}${isUnreliable?' ⚠️':''}</small></div>
+      </div></div>`;
+  }
+  document.getElementById('priorityCards').innerHTML = cardsHtml;
+
+  // 条形图
+  const orderedTargets = [...priority, ...Object.keys(preds).filter(t => !priority.includes(t))];
+  const colors = orderedTargets.map(t => unreliable.includes(t) ? 'rgba(220,80,60,0.6)' :
+    `rgba(46,116,181,${Math.max(0.3, r2dict[t]||0).toFixed(2)})`);
+
+  Plotly.newPlot('predictChart', [{
+    type: 'bar', orientation: 'h',
+    y: orderedTargets, x: orderedTargets.map(t => preds[t]),
+    marker: {color: colors},
+    text: orderedTargets.map(t => preds[t].toFixed(2) + '%'),
+    textposition: 'outside',
+    hovertemplate: '<b>%{y}</b><br>预测值: %{x:.4f}%<extra></extra>',
+  }], {
+    xaxis: {title: '产率 (%)', gridcolor: '#eee'},
+    yaxis: {autorange: 'reversed'},
+    height: 420, margin: {l: 160, r: 60, t: 20, b: 40},
+    plot_bgcolor: 'white', paper_bgcolor: 'white',
+  }, {responsive: true, displayModeBar: false});
+
+  // 表格
+  let tableHtml = `<table class="table table-sm table-hover result-table"><thead>
+    <tr><th>目标变量</th><th>预测产率 (%)</th><th>模型 R²</th><th>备注</th></tr></thead><tbody>`;
+  for (const t of orderedTargets) {
+    if (!(t in preds)) continue;
+    const flag = unreliable.includes(t) ? '<span class="badge badge-unreliable">⚠️ 低可信</span>' :
+                 priority.includes(t) ? '<span class="badge badge-priority">⭐ 核心</span>' : '';
+    tableHtml += `<tr><td>${t}</td><td>${preds[t].toFixed(4)}</td><td>${(r2dict[t]||0).toFixed(3)}</td><td>${flag}</td></tr>`;
+  }
+  tableHtml += '</tbody></table>';
+  document.getElementById('predictTable').innerHTML = tableHtml;
+}
+
+// ═══════════════════════════════════════════════════════
+// TAB 2：反向设计
+// ═══════════════════════════════════════════════════════
+function buildObjectivesForm() {
+  if (!statusData || !statusData.targets) return;
+  const r2dict = statusData.r2 || {};
+  const priority = metadata.priority_targets || [];
+  const unreliable = metadata.unreliable_targets || [];
+  const allTargets = [...priority, ...statusData.targets.filter(t => !priority.includes(t))];
+
+  let html = `<div style="max-height:300px;overflow-y:auto">
+    <div class="obj-row fw-semibold mb-1 small">
+      <span>目标变量</span><span>方向</span><span>权重</span><span>启用</span>
+    </div>`;
+  for (const t of allTargets) {
+    const r2 = (r2dict[t] || 0).toFixed(3);
+    const isUnreliable = unreliable.includes(t);
+    const isPriority = priority.includes(t);
+    const defaultChecked = isPriority && !isUnreliable ? 'checked' : '';
+    const flag = isUnreliable ? '⚠️' : isPriority ? '⭐' : '';
+    html += `<div class="obj-row mb-1">
+      <span title="${t}" class="${isUnreliable?'text-danger':''}">${flag} ${t} <small class="text-muted">(${r2})</small></span>
+      <select class="form-select form-select-sm" id="dir_${t}">
+        <option value="maximize">最大化</option>
+        <option value="minimize" ${t==='C1_焦炭'?'selected':''}>最小化</option>
+      </select>
+      <input type="range" class="form-range" id="w_${t}" min="0" max="2" step="0.1" value="${isUnreliable?0:1}"
+        oninput="document.getElementById('wval_${t}').textContent=this.value">
+      <span><small id="wval_${t}">1</small></span>
+      <input type="checkbox" class="form-check-input" id="en_${t}" ${defaultChecked}>
+    </div>`;
+  }
+  html += '</div>';
+  document.getElementById('objectivesForm').innerHTML = html;
+}
+
+async function runOptimize() {
+  const btn = document.getElementById('btnOptimize');
+  if (!statusData || !statusData.trained) { alert('请先训练模型'); return; }
+
+  // 收集目标
+  const objectives = [];
+  const allTargets = statusData.targets || [];
+  for (const t of allTargets) {
+    const enEl = document.getElementById('en_' + t);
+    const wEl  = document.getElementById('w_' + t);
+    const dirEl = document.getElementById('dir_' + t);
+    if (enEl && enEl.checked && wEl && parseFloat(wEl.value) > 0) {
+      objectives.push({target: t, direction: dirEl.value, weight: parseFloat(wEl.value)});
+    }
+  }
+  if (!objectives.length) { alert('请至少选择一个优化目标'); return; }
+
+  // 收集搜索空间配置
+  const activeGroups = ['M','FM','Z','FZ'].filter(g => {
+    const el = document.getElementById('grp_' + g);
+    return el && el.checked;
+  });
+  const fixedOil = document.getElementById('fixedOil').value;
+  const fixed_features = {};
+  const oilCol = (metadata.groups.oil || [])[0];
+  if (oilCol) fixed_features[oilCol] = fixedOil;
+
+  // 固定 T 值（若不优化）
+  const optT = document.getElementById('opt_T').checked;
+  if (!optT && metadata.groups.T) {
+    for (const col of metadata.groups.T) {
+      const b = metadata.bounds[col] || [400, 600, 500];
+      fixed_features[col] = b[2]; // 中位数
+    }
+  }
+
+  const body = {
+    objectives,
+    active_groups: activeGroups,
+    optimize_L: document.getElementById('opt_L').checked,
+    optimize_T: optT,
+    n_trials: parseInt(document.getElementById('nTrials').value),
+    seed: parseInt(document.getElementById('optSeed').value),
+    fixed_features,
+  };
+
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner-border spinner-border-sm"></div> 优化中...';
+  document.getElementById('optimizePlaceholder').style.display = 'none';
+  document.getElementById('optimizeResult').style.display = '';
+  document.getElementById('optProgress').style.display = '';
+  document.getElementById('optBestFormula').innerHTML = '';
+  document.getElementById('optBestPreds').innerHTML = '';
+
+  try {
+    const res = await api('/optimize', 'POST', body);
+    optJobId = res.job_id;
+    optPollTimer = setInterval(() => pollOptimize(btn), 2000);
+  } catch(e) {
+    alert('启动失败：' + e.message);
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-lightning-fill"></i> 开始贝叶斯优化';
+  }
+}
+
+async function pollOptimize(btn) {
+  try {
+    const job = await api('/optimize/' + optJobId);
+    const pct = job.progress;
+    document.getElementById('optProgressBar').style.width = pct + '%';
+    document.getElementById('optProgressPct').textContent = pct + '%';
+    document.getElementById('optProgressText').textContent =
+      job.best_value != null ? `最优目标值：${job.best_value.toFixed(4)}` : '优化中...';
+
+    // 更新优化进程图
+    if (job.trials_log && job.trials_log.length > 1) {
+      const nums = job.trials_log.map(x => x[0]);
+      const vals = job.trials_log.map(x => x[1]);
+      const best = vals.reduce((a, v) => { a.push(Math.min(a.length ? a[a.length-1] : Infinity, v)); return a; }, []);
+      Plotly.react('optChart', [
+        {x: nums, y: vals, mode:'markers', name:'每次试验', marker:{color:'lightblue',size:5}, opacity:0.5},
+        {x: nums, y: best, mode:'lines', name:'历史最优', line:{color:'navy',width:2}},
+      ], {title:'优化进程', xaxis:{title:'试验次数'}, yaxis:{title:'目标函数值'}, height:260,
+          plot_bgcolor:'white', paper_bgcolor:'white', margin:{t:30,b:40,l:50,r:20}},
+        {responsive:true, displayModeBar:false});
+    }
+
+    if (job.status === 'done') {
+      clearInterval(optPollTimer);
+      document.getElementById('optProgress').style.display = 'none';
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-lightning-fill"></i> 开始贝叶斯优化';
+      renderOptResult(job.result);
+    } else if (job.status === 'error') {
+      clearInterval(optPollTimer);
+      alert('优化出错：' + job.error);
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-lightning-fill"></i> 开始贝叶斯优化';
+    }
+  } catch(e) { console.error(e); }
+}
+
+function renderOptResult(result) {
+  if (!result) return;
+  const params = result.best_params || {};
+  const preds  = result.best_preds || {};
+  const priority = result.priority_targets || [];
+
+  // 最优配方（只显示非零数值列）
+  let formulaHtml = '<h6 class="mt-3">最优催化剂配方</h6>';
+  formulaHtml += '<table class="table table-sm result-table"><thead><tr><th>特征</th><th>最优值</th></tr></thead><tbody>';
+  for (const [col, val] of Object.entries(params)) {
+    if (typeof val === 'number' && val === 0) continue;
+    formulaHtml += `<tr><td>${col}</td><td>${typeof val === 'number' ? val.toFixed(4) : val}</td></tr>`;
+  }
+  formulaHtml += '</tbody></table>';
+  document.getElementById('optBestFormula').innerHTML = formulaHtml;
+
+  // 最优配方预测产率
+  let predsHtml = '<h6 class="mt-2">最优配方预测产率</h6>';
+  predsHtml += '<table class="table table-sm result-table"><thead><tr><th>目标</th><th>预测产率 (%)</th></tr></thead><tbody>';
+  const ordTargets = [...priority, ...Object.keys(preds).filter(t => !priority.includes(t))];
+  for (const t of ordTargets) {
+    if (!(t in preds)) continue;
+    const flag = priority.includes(t) ? '⭐' : '';
+    predsHtml += `<tr><td>${flag} ${t}</td><td>${preds[t].toFixed(4)}</td></tr>`;
+  }
+  predsHtml += '</tbody></table>';
+  document.getElementById('optBestPreds').innerHTML = predsHtml;
+
+  // 下载按钮
+  const csvData = Object.entries(params).map(([k,v]) => `${k},${v}`).join('\n');
+  const blob = new Blob(['特征,最优值\n' + csvData], {type:'text/csv'});
+  const url  = URL.createObjectURL(blob);
+  document.getElementById('optDownloadBtns').innerHTML =
+    `<a href="${url}" download="optimal_formulation.csv" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-download"></i> 下载最优配方 CSV
+    </a>`;
+}
+
+// ═══════════════════════════════════════════════════════
+// TAB 3：模型训练
+// ═══════════════════════════════════════════════════════
+function renderTrainStatus(data) {
+  if (!data.trained) return;
+  const r2dict = data.r2 || {};
+  const sorted = Object.entries(r2dict).sort((a,b) => b[1]-a[1]);
+  let html = `<div class="alert alert-success mb-2">✓ 模型已训练 | 时间：${data.train_time} | 目标数：${data.n_targets}</div>`;
+  html += '<table class="table table-sm result-table"><thead><tr><th>目标</th><th>R²</th><th>MAE</th></tr></thead><tbody>';
+  for (const [t, r2] of sorted) {
+    const mae = (data.mae||{})[t] || 0;
+    const color = r2 >= 0.7 ? 'text-success' : r2 >= 0.3 ? 'text-warning' : 'text-danger';
+    html += `<tr><td>${t}</td><td class="${color} fw-semibold">${r2.toFixed(4)}</td><td>${mae.toFixed(4)}</td></tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('trainStatusContent').innerHTML = html;
+}
+
+async function runTrain() {
+  if (!confirm('确认开始训练？这将覆盖现有模型文件，约需 2-5 分钟。')) return;
+  const body = {
+    n_estimators: parseInt(document.getElementById('nEst').value),
+    learning_rate: parseFloat(document.getElementById('lr').value),
+    max_depth: parseInt(document.getElementById('depth').value),
+    test_size: parseFloat(document.getElementById('testSize').value),
+  };
+  try {
+    const res = await api('/train', 'POST', body);
+    trainJobId = res.job_id;
+    document.getElementById('trainProgress').style.display = '';
+    trainPollTimer = setInterval(pollTrain, 2000);
+  } catch(e) { alert('启动失败：' + e.message); }
+}
+
+async function pollTrain() {
+  try {
+    const job = await api('/train/' + trainJobId);
+    document.getElementById('trainProgressBar').style.width = job.progress + '%';
+    document.getElementById('trainProgressPct').textContent = job.progress + '%';
+    document.getElementById('trainProgressText').textContent =
+      job.current_target ? `训练中：${job.current_target}` : (job.status === 'done' ? '完成！' : '准备中...');
+
+    if (job.results) {
+      let tbl = '<table class="table table-sm result-table"><thead><tr><th>目标</th><th>状态</th><th>R²</th><th>MAE</th></tr></thead><tbody>';
+      for (const r of job.results) {
+        const color = !r.r2 ? '' : r.r2 >= 0.7 ? 'text-success' : r.r2 >= 0.3 ? 'text-warning' : 'text-danger';
+        tbl += `<tr><td>${r.target}</td><td>${r.status==='done'?'✓':'跳过'}</td>
+          <td class="${color}">${r.r2!=null?r.r2.toFixed(4):'-'}</td>
+          <td>${r.mae!=null?r.mae.toFixed(4):'-'}</td></tr>`;
+      }
+      tbl += '</tbody></table>';
+      document.getElementById('trainResultTable').innerHTML = tbl;
+    }
+
+    if (job.status === 'done') {
+      clearInterval(trainPollTimer);
+      await loadStatus();
+      await loadMetadata();
+      loadAnalysisOverview();
+    } else if (job.status === 'error') {
+      clearInterval(trainPollTimer);
+      alert('训练出错：' + job.error);
+    }
+  } catch(e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════════════════════
+// TAB 4：模型分析
+// ═══════════════════════════════════════════════════════
+async function loadAnalysisOverview() {
+  try {
+    const summary = await api('/analysis/summary');
+    if (!summary || !summary.length) return;
+
+    // 找到列名
+    const cols = Object.keys(summary[0]);
+    const tCol   = cols.find(c => c.includes('目标')) || cols[0];
+    const xR2Col = cols.find(c => c.includes('XGB') && c.includes('R2'));
+    const lR2Col = cols.find(c => c.includes('LGB') && c.includes('R2'));
+
+    const targets = summary.map(r => r[tCol]);
+    const xgbR2   = summary.map(r => parseFloat(r[xR2Col]||0));
+    const lgbR2   = lR2Col ? summary.map(r => parseFloat(r[lR2Col]||0)) : null;
+
+    // 分类卡片
+    const high = xgbR2.filter(v=>v>=0.7).length;
+    const med  = xgbR2.filter(v=>v>=0.3&&v<0.7).length;
+    const low  = xgbR2.filter(v=>v<0.3).length;
+    document.getElementById('r2CategoryCards').innerHTML = `
+      <div class="col-4"><div class="card text-center p-2 border-success">
+        <div class="fs-3 fw-bold text-success">${high}</div>
+        <div class="small">高可信 R²≥0.7</div></div></div>
+      <div class="col-4"><div class="card text-center p-2 border-warning">
+        <div class="fs-3 fw-bold text-warning">${med}</div>
+        <div class="small">中等 0.3≤R²<0.7</div></div></div>
+      <div class="col-4"><div class="card text-center p-2 border-danger">
+        <div class="fs-3 fw-bold text-danger">${low}</div>
+        <div class="small">低可信 R²<0.3</div></div></div>`;
+
+    // XGB vs LGB 对比图
+    const traces = [{name:'XGBoost', x:targets, y:xgbR2, type:'bar', marker:{color:'#2E74B5'}}];
+    if (lgbR2) traces.push({name:'LightGBM', x:targets, y:lgbR2, type:'bar', marker:{color:'#E87722',opacity:0.8}});
+    Plotly.newPlot('r2CompareChart', traces, {
+      barmode:'group', xaxis:{tickangle:-45}, yaxis:{title:'R²', range:[-0.5,1]},
+      shapes:[{type:'line',x0:-0.5,x1:targets.length-0.5,y0:0.7,y1:0.7,line:{dash:'dash',color:'green'}},
+              {type:'line',x0:-0.5,x1:targets.length-0.5,y0:0.3,y1:0.3,line:{dash:'dot',color:'orange'}}],
+      height:380, plot_bgcolor:'white', paper_bgcolor:'white', margin:{t:20,b:120,l:50,r:20},
+      legend:{orientation:'h',y:1.05},
+    }, {responsive:true, displayModeBar:false});
+
+    // 汇总表
+    let tbl = '<div style="overflow-x:auto"><table class="table table-sm table-hover result-table"><thead><tr>';
+    for (const c of cols) tbl += `<th>${c}</th>`;
+    tbl += '</tr></thead><tbody>';
+    for (const row of summary) {
+      const r2v = parseFloat(row[xR2Col]||0);
+      const cls = r2v>=0.7?'table-success':r2v<0.3?'table-danger':'';
+      tbl += `<tr class="${cls}">` + cols.map(c=>`<td>${row[c]??''}</td>`).join('') + '</tr>';
+    }
+    tbl += '</tbody></table></div>';
+    document.getElementById('summaryTable').innerHTML = tbl;
+  } catch(e) { console.warn('分析数据暂不可用', e); }
+}
+
+function populateTargetSelects() {
+  const targets = statusData?.targets || [];
+  for (const selId of ['scatterTarget', 'importanceTarget']) {
+    const sel = document.getElementById(selId);
+    if (!sel) continue;
+    sel.innerHTML = '';
+    for (const t of targets) {
+      const opt = document.createElement('option');
+      opt.value = opt.textContent = t;
+      sel.appendChild(opt);
+    }
+  }
+  loadScatter();
+  loadImportance();
+}
+
+async function loadScatter() {
+  const target = document.getElementById('scatterTarget')?.value;
+  if (!target) return;
+  try {
+    const data = await api('/analysis/result/' + encodeURIComponent(target));
+    const cols = Object.keys(data);
+    const actualCol = cols.find(c => c.includes('实际')) || cols[0];
+    const xgbCol    = cols.find(c => c.includes('XGB'));
+    if (!actualCol || !xgbCol) return;
+
+    const actual = data[actualCol];
+    const pred   = data[xgbCol];
+    const resids = pred.map((p,i) => p - actual[i]);
+
+    const lo = Math.min(...actual, ...pred), hi = Math.max(...actual, ...pred);
+    const margin = (hi-lo)*0.05;
+
+    // 指标卡片
+    const n = actual.length;
+    const mae  = actual.reduce((s,a,i)=>s+Math.abs(pred[i]-a),0)/n;
+    const mse  = actual.reduce((s,a,i)=>s+(pred[i]-a)**2,0)/n;
+    const ssTot = actual.reduce((s,a)=>s+(a-actual.reduce((x,y)=>x+y)/n)**2,0);
+    const ssRes = actual.reduce((s,a,i)=>s+(a-pred[i])**2,0);
+    const r2   = 1 - ssRes/ssTot;
+    document.getElementById('scatterMetrics').innerHTML = `
+      <div class="col-3"><div class="card metric-card"><div class="val small">${n}</div><div class="lbl">样本数</div></div></div>
+      <div class="col-3"><div class="card metric-card"><div class="val small">${r2.toFixed(4)}</div><div class="lbl">R²</div></div></div>
+      <div class="col-3"><div class="card metric-card"><div class="val small">${mae.toFixed(4)}</div><div class="lbl">MAE</div></div></div>
+      <div class="col-3"><div class="card metric-card"><div class="val small">${Math.sqrt(mse).toFixed(4)}</div><div class="lbl">RMSE</div></div></div>`;
+
+    Plotly.newPlot('scatterChart', [
+      {x:[lo-margin,hi+margin],y:[lo-margin,hi+margin],mode:'lines',name:'理想线',line:{color:'red',dash:'dash',width:1.5}},
+      {x:actual,y:pred,mode:'markers',name:'预测点',marker:{color:'#2E74B5',size:5,opacity:0.6},
+       hovertemplate:'实际: %{x:.3f}<br>预测: %{y:.3f}<extra></extra>'},
+    ], {xaxis:{title:'实际值 (%)'},yaxis:{title:'预测值 (%)'},height:360,
+        plot_bgcolor:'white',paper_bgcolor:'white',margin:{t:20,b:50,l:50,r:20},
+        legend:{orientation:'h',y:1.05}}, {responsive:true,displayModeBar:false});
+
+    Plotly.newPlot('residualChart', [{
+      x:resids, type:'histogram', nbinsx:30,
+      marker:{color:'#2E74B5',opacity:0.7},
+    }], {xaxis:{title:'残差'},yaxis:{title:'频数'},height:360,
+         shapes:[{type:'line',x0:0,x1:0,y0:0,y1:1,yref:'paper',line:{color:'red',dash:'dash'}}],
+         plot_bgcolor:'white',paper_bgcolor:'white',margin:{t:20,b:50,l:50,r:20}},
+      {responsive:true,displayModeBar:false});
+  } catch(e) { console.warn(e); }
+}
+
+async function loadImportance() {
+  const target = document.getElementById('importanceTarget')?.value;
+  const topN   = parseInt(document.getElementById('importanceTopN')?.value || 15);
+  if (!target) return;
+  try {
+    const data = await api('/analysis/importance/' + encodeURIComponent(target));
+    const featCol = Object.keys(data[0]).find(c=>c.includes('特征'))||Object.keys(data[0])[0];
+    const scoreCol = Object.keys(data[0]).find(c=>c.includes('重要性')||c.toLowerCase().includes('importance'))||Object.keys(data[0])[1];
+    const top = data.slice(0, topN);
+    Plotly.newPlot('importanceChart',
+      [{type:'bar',orientation:'h',
+        y: top.map(r=>r[featCol]),
+        x: top.map(r=>r[scoreCol]),
+        marker:{color:'#2E74B5',colorscale:'Blues'},
+        hovertemplate:'%{y}: %{x:.4f}<extra></extra>',
+      }], {
+        title: `特征重要性 Top ${topN} — ${target}`,
+        yaxis:{autorange:'reversed'},
+        xaxis:{title:'重要性得分'},
+        height: Math.max(350, topN*24),
+        plot_bgcolor:'white', paper_bgcolor:'white',
+        margin:{t:40,b:40,l:180,r:40},
+      }, {responsive:true,displayModeBar:false});
+  } catch(e) { console.warn(e); }
+}
+
+function populateOilSelect(selId, classes) {
+  const sel = document.getElementById(selId);
+  if (!sel || !classes) return;
+  sel.innerHTML = '';
+  for (const c of classes) {
+    const opt = document.createElement('option');
+    opt.value = opt.textContent = c;
+    sel.appendChild(opt);
+  }
+}
+</script>
+</body>
+</html>
