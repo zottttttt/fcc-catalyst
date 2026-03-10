@@ -4,10 +4,11 @@
 所有模块从此文件导入常量，避免硬编码
 """
 
+import os
 from pathlib import Path
 
 # ── 路径 ──────────────────────────────────────────────────
-ROOT_DIR   = Path("d:/cc_test")
+ROOT_DIR   = Path(os.environ.get("FCC_ROOT", str(Path(__file__).parent.parent)))
 DATA_PATH  = ROOT_DIR / "ml_A_all.xlsx"
 MODELS_DIR = ROOT_DIR / "models"
 LOGS_DIR   = ROOT_DIR / "logs"
